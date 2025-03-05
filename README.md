@@ -549,7 +549,7 @@ mvn clean package -e -Pdist,native \
 -DCMAKE_OSX_ARCHITECTURES=arm64
 ```
 
-### 3.6 编译hadoop-mapreduce-client-nativetask 时显示"PRIu64" d
+### 3.6 编译hadoop-mapreduce-client-nativetask 时显示"PRIu64" 空格问题
 
 这个模块不能跳过了，只能老老实实解决问题。
 
@@ -670,4 +670,26 @@ mvn clean package -e -Pdist,native \
 [WARNING] make: *** [all] Error 2
 ```
 
-编译器提示在使用 `PRIu64` 宏时需要在格式字符串中的 `%` 和宏之间加一个空格。这是由于 C++11 标准要求在字面量和标识符之间要有空格，以避免歧义.
+编译器提示在使用 `PRIu64` 宏时需要在格式字符串中的 `%` 和宏之间加一个空格。这是由于 C++11 标准要求在字面量和标识符之间要有空格，以避免歧义。
+
+```sh
+# 修改 PRId64 和 PRIu64
+vim hadoop-3.3.6-src/hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-nativetask/src/main/native/src/util/StringUtil.cc
+# 修改 PRIu64
+vim hadoop-3.3.6-src/hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-nativetask/src/main/native/src/lib/MapOutputCollector.cc
+# 修改 PRId64
+vim hadoop-3.3.6-src/hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-nativetask/src/main/native/test/TestCompressions.cc
+```
+
+终于编译成功了
+
+![image-20250305225419470](images/image-20250305225419470.png)
+
+生成的lib目录下
+
+![image-20250305225736817](images/image-20250305225736817.png)
+
+
+
+
+
