@@ -689,7 +689,28 @@ vim hadoop-3.3.6-src/hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-map
 
 ![image-20250305225736817](images/image-20250305225736817.png)
 
+最终编译命令
 
+```
+mvn clean package -e -Pdist,native \
+-DskipTests \
+-Dmaven.javadoc.skip=true \
+-pl '!hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager,!hadoop-yarn-project/hadoop-yarn/hadoop-yarn-applications/hadoop-yarn-applications-catalog/hadoop-yarn-applications-catalog-webapp' \
+-DCMAKE_PREFIX_PATH=/opt/homebrew/opt/cmake \
+-Dopenssl.prefix=/opt/openssl \
+-Drequire.zlib=true \
+-Dzlib.include.dir=/opt/homebrew/opt/zlib/include \
+-Dzlib.library=/opt/homebrew/opt/zlib/lib \
+-Drequire.snappy=true \
+-Dsnappy.prefix=/opt/homebrew/opt/snappy \
+-Dsnappy.lib=/opt/homebrew/opt/snappy/lib \
+-Dsnappy.include=/opt/homebrew/opt/snappy/include \
+-Drequire.zstd=true \
+-Dzstd.prefix=/opt/homebrew/opt/zstd \
+-Dzstd.lib=/opt/homebrew/opt/zstd/lib \
+-Dzstd.include=/opt/homebrew/opt/zstd/include \
+-DCMAKE_OSX_ARCHITECTURES=arm64
+```
 
 
 
