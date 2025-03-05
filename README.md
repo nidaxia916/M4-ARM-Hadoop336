@@ -379,3 +379,295 @@ WARNING] /opt/software/hadoop-3.3.6-src/hadoop-common-project/hadoop-common/src/
 ```
 
 我手动编译安装了openssl 1.1.0版本，但是还是出现了这个问题，还得请教一下deepseek
+
+**这个问题主要还是openssl 版本的问题，从hadoop-3.3.6-src/hadoop-common-project/hadoop-common/src/main/native/src/org/apache/hadoop/crypto/random/OpensslSecureRandom.c文件中可以看出来，建议使用openssl版本小于1.1.0版本，是没有这个问题的。**
+
+但是我并不想退回openssl版本了，索性根据deepseek提示对hadoop中的OpensslSecureRandom.c文件源代码进行修改：
+
+```c
+// 1. 在文件#include之后，变量定义之前的行添加以下内容
+#if OPENSSL_VERSION_NUMBER >= 0x10100000L && !defined(LIBRESSL_VERSION_NUMBER)
+#define HADOOP_CRYPTO_set_locking_callback(func)
+#define HADOOP_CRYPTO_set_id_callback(func)
+#define HADOOP_CRYPTO_num_locks() 1
+#endif
+
+// 2. 修改所有调用 CRYPTO_* 的地方为 HADOOP_CRYPTO_*, 例如：
+// 示例：替换 dlsym_CRYPTO_num_locks() 调用
+for (i = 0; i < HADOOP_CRYPTO_num_locks(); i++) {
+  pthread_mutex_destroy(&lock_cs[i]);
+}
+
+// 3. 直接注释或删除所有涉及 dlsym_CRYPTO_* 的代码：例如
+lock_cs = dlsym_CRYPTO_malloc(HADOOP_CRYPTO_num_locks() * sizeof(pthread_mutex_t));
+dlsym_CRYPTO_set_id_callback(...);
+dlsym_CRYPTO_set_locking_callback(...);
+```
+
+### 3.4 hadoop-yarn-server-nodemanager 编译报错
+
+```verilog
+[WARNING] [ 32%] Building C object CMakeFiles/container.dir/main/native/container-executor/impl/modules/devices/devices-module.c.o
+[WARNING] /Library/Developer/CommandLineTools/usr/bin/cc  -I/System/Library/Frameworks -I/opt/software/hadoop-3.3.6-src/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/src -I/opt/software/hadoop-3.3.6-src/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/target/native -I/opt/software/hadoop-3.3.6-src/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/src/main/native/container-executor -I/opt/software/hadoop-3.3.6-src/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/src/main/native/container-executor/impl -I/opt/software/hadoop-3.3.6-src/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/src/main/native/oom-listener/impl -I/opt/software/hadoop-3.3.6-src/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/src/../../../../../hadoop-common-project/hadoop-common/src/main/native/src/org/apache/hadoop/security -isystem /opt/software/hadoop-3.3.6-src/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/src/../../../../../hadoop-common-project/hadoop-common/src/main/native/gtest/include -std=gnu99  -g -O2 -Wall -pthread -D_FILE_OFFSET_BITS=64 -std=gnu99 -arch arm64 -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX15.2.sdk -MD -MT CMakeFiles/container.dir/main/native/container-executor/impl/modules/devices/devices-module.c.o -MF CMakeFiles/container.dir/main/native/container-executor/impl/modules/devices/devices-module.c.o.d -o CMakeFiles/container.dir/main/native/container-executor/impl/modules/devices/devices-module.c.o -c /opt/software/hadoop-3.3.6-src/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/src/main/native/container-executor/impl/modules/devices/devices-module.c
+[WARNING] /Library/Developer/CommandLineTools/usr/bin/cc -std=gnu99  -g -O2 -Wall -pthread -D_FILE_OFFSET_BITS=64 -arch arm64 -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX15.2.sdk -Wl,-search_paths_first -Wl,-headerpad_max_install_names "CMakeFiles/oom-listener.dir/main/native/oom-listener/impl/oom_listener.c.o" "CMakeFiles/oom-listener.dir/main/native/oom-listener/impl/oom_listener_main.c.o" -o target/usr/local/bin/oom-listener
+[WARNING] [ 32%] Built target oom-listener
+[WARNING] [ 34%] Linking CXX static library libgtest.a
+[WARNING] /opt/homebrew/bin/cmake -P CMakeFiles/gtest.dir/cmake_clean_target.cmake
+[WARNING] /opt/homebrew/bin/cmake -E cmake_link_script CMakeFiles/gtest.dir/link.txt --verbose=1
+[WARNING] /Library/Developer/CommandLineTools/usr/bin/ar qc libgtest.a "CMakeFiles/gtest.dir/opt/software/hadoop-3.3.6-src/hadoop-common-project/hadoop-common/src/main/native/gtest/gtest-all.cc.o"
+[WARNING] /Library/Developer/CommandLineTools/usr/bin/ranlib libgtest.a
+[WARNING] [ 34%] Built target gtest
+[WARNING] /opt/software/hadoop-3.3.6-src/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/src/main/native/container-executor/impl/container-executor.c:1717:5: error: call to undeclared function 'ioctl'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]
+[WARNING]  1717 |     ioctl(0, TIOCSCTTY, 1);
+[WARNING]       |     ^
+[WARNING] 1 error generated.
+[WARNING] make[2]: *** [CMakeFiles/container.dir/main/native/container-executor/impl/container-executor.c.o] Error 1
+[WARNING] make[2]: *** Waiting for unfinished jobs....
+[WARNING] make[1]: *** [CMakeFiles/container.dir/all] Error 2
+[WARNING] make[1]: *** Waiting for unfinished jobs....
+[WARNING] make: *** [all] Error 2
+```
+
+同样还是hadoop 的某个c文件调用了未声明的函数导致的，继续请教deepseek。
+
+deepseek给的建议是修改container-executor.c文件
+
+```shell
+vim hadoop-3.3.6-src/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/src/main/native/container-executor/impl/container-executor.c
+
+# 在文件开头的 #include 区域添加：
+#include <sys/ioctl.h>  // 添加此行
+```
+
+这个问题解决，编译到53%时，遇到了新的问题，继续看
+
+```verilog
+[WARNING] [ 53%] Built target gtest
+[WARNING] /opt/software/hadoop-3.3.6-src/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/src/main/native/container-executor/impl/container-executor.c:91:20: warning: unused variable 'PROC_PATH' [-Wunused-variable]
+[WARNING]    91 | static const char* PROC_PATH = "/proc";
+[WARNING]       |                    ^~~~~~~~~
+[WARNING] /opt/software/hadoop-3.3.6-src/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/src/main/native/container-executor/impl/utils/docker-util.c:58:13: warning: comparison of array 'args->data' equal to a null pointer is always false [-Wtautological-pointer-compare]
+[WARNING]    58 |   if (args->data == NULL || args->length >= DOCKER_ARG_MAX) {
+[WARNING]       |       ~~~~~~^~~~    ~~~~
+[WARNING] /opt/software/hadoop-3.3.6-src/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/src/main/native/container-executor/impl/utils/docker-util.c:65:13: warning: comparison of array 'args->data' not equal to a null pointer is always true [-Wtautological-pointer-compare]
+[WARNING]    65 |   if (args->data != NULL) {
+[WARNING]       |       ~~~~~~^~~~    ~~~~
+[WARNING] /opt/software/hadoop-3.3.6-src/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/src/main/native/container-executor/impl/runc/runc.c:18:10: fatal error: 'linux/loop.h' file not found
+[WARNING]    18 | #include <linux/loop.h>
+[WARNING]       |          ^~~~~~~~~~~~~~
+[WARNING] 1 error generated.
+[WARNING] make[2]: *** [CMakeFiles/container.dir/main/native/container-executor/impl/runc/runc.c.o] Error 1
+[WARNING] make[2]: *** Waiting for unfinished jobs....
+[WARNING] /opt/software/hadoop-3.3.6-src/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/src/main/native/container-executor/impl/runc/runc_reap.c:24:10: fatal error: 'mntent.h' file not found
+[WARNING]    24 | #include <mntent.h>
+[WARNING]       |          ^~~~~~~~~~
+[WARNING] 1 error generated.
+[WARNING] make[2]: *** [CMakeFiles/container.dir/main/native/container-executor/impl/runc/runc_reap.c.o] Error 1
+[WARNING] /opt/software/hadoop-3.3.6-src/hadoop-common-project/hadoop-common/src/main/native/src/org/apache/hadoop/security/hadoop_user_info.c:195:26: warning: passing 'gid_t *' (aka 'unsigned int *') to parameter of type 'int *' converts between pointers to integer types with different sign [-Wpointer-sign]
+[WARNING]   195 |                          uinfo->gids, &ngroups);
+[WARNING]       |                          ^~~~~~~~~~~
+[WARNING] /Library/Developer/CommandLineTools/SDKs/MacOSX15.2.sdk/usr/include/unistd.h:654:43: note: passing argument to parameter here
+[WARNING]   654 | int      getgrouplist(const char *, int, int *, int *);
+[WARNING]       |                                               ^
+[WARNING] /opt/software/hadoop-3.3.6-src/hadoop-common-project/hadoop-common/src/main/native/src/org/apache/hadoop/security/hadoop_user_info.c:226:26: warning: passing 'gid_t *' (aka 'unsigned int *') to parameter of type 'int *' converts between pointers to integer types with different sign [-Wpointer-sign]
+[WARNING]   226 |                          uinfo->gids, &ngroups);
+[WARNING]       |                          ^~~~~~~~~~~
+[WARNING] /Library/Developer/CommandLineTools/SDKs/MacOSX15.2.sdk/usr/include/unistd.h:654:43: note: passing argument to parameter here
+[WARNING]   654 | int      getgrouplist(const char *, int, int *, int *);
+[WARNING]       |                                               ^
+[WARNING] 2 warnings generated.
+[WARNING] 1 warning generated.
+[WARNING] 2 warnings generated.
+[WARNING] make[1]: *** [CMakeFiles/container.dir/all] Error 2
+[WARNING] make[1]: *** Waiting for unfinished jobs....
+[WARNING] make: *** [all] Error 2
+```
+
+这个报错看起来是nodemanager 容器相关的东西，要去加载linux下的loop.c和mntent.c文件。。mac上没有。。。
+
+尝试了一些办法，没有能够解决这个报错，但是我的目的是获得hadoop native lib，我决定跳过这个project的编译。。。
+
+```
+mvn clean package -e -Pdist,native \
+-DskipTests \
+-Dmaven.javadoc.skip=true \
+-pl '!hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager' \
+-DCMAKE_PREFIX_PATH=/opt/homebrew/opt/cmake \
+-Dopenssl.prefix=/opt/openssl \
+-Drequire.zlib=true \
+-Dzlib.include.dir=/opt/homebrew/opt/zlib/include \
+-Dzlib.library=/opt/homebrew/opt/zlib/lib \
+-DCMAKE_OSX_ARCHITECTURES=arm64
+```
+
+### 3.5  编译 Hadoop YARN Application Catalog Webapp 时报错
+
+```verilog
+INFO] Running 'yarn ' in /opt/software/hadoop-3.3.6-src/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-applications/hadoop-yarn-applications-catalog/hadoop-yarn-applications-catalog-webapp/target
+[INFO] yarn install v1.22.5
+[INFO] info No lockfile found.
+[INFO] [1/4] Resolving packages...
+[INFO] warning jquery@3.3.1: This version is deprecated. Please upgrade to the latest version or find support at https://www.herodevs.com/support/jquery-nes.
+[INFO] warning angular-route@1.6.10: For the actively supported Angular, see https://www.npmjs.com/package/@angular/core. AngularJS support has officially ended. For extended AngularJS support options, see https://goo.gle/angularjs-path-forward.
+[INFO] warning angular@1.6.10: For the actively supported Angular, see https://www.npmjs.com/package/@angular/core. AngularJS support has officially ended. For extended AngularJS support options, see https://goo.gle/angularjs-path-forward.
+[INFO] warning apidoc > apidoc-core > glob@7.2.3: Glob versions prior to v9 are no longer supported
+[INFO] warning apidoc > apidoc-core > glob > inflight@1.0.6: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.
+[INFO] [2/4] Fetching packages...
+[INFO] error triple-beam@1.4.1: The engine "node" is incompatible with this module. Expected version ">= 14.0.0". Got "12.22.1"
+[INFO] error Found incompatible module.
+[INFO] info Visit https://yarnpkg.com/en/docs/cli/install for documentation about this command
+```
+
+这个报错显示Node.js版本太低
+
+使用nvm手动安装Node.js 14
+
+```shell
+# 安装 nvm
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+# 安装并切换至 Node.js 14+  （Node.js 14 需要python3.10以下的版本，可恶我的Mac自带python3.13）
+# 使用anaconda 创建一个合适的python环境，在这个环境中进行安装Node.js 14
+nvm install 14  # 安装 Node.js 14.x
+nvm use 14      # 切换到 Node.js 14
+# 验证版本
+node -v  # 应输出 v14.x 或更高
+# 安装失败， 可恶，后面再折腾吧，先跳过这个模块了
+```
+
+重新编译。
+
+```
+mvn clean package -e -Pdist,native \
+-DskipTests \
+-Dmaven.javadoc.skip=true \
+-pl '!hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager,!hadoop-yarn-project/hadoop-yarn/hadoop-yarn-applications/hadoop-yarn-applications-catalog/hadoop-yarn-applications-catalog-webapp' \
+-DCMAKE_PREFIX_PATH=/opt/homebrew/opt/cmake \
+-Dopenssl.prefix=/opt/openssl \
+-Drequire.zlib=true \
+-Dzlib.include.dir=/opt/homebrew/opt/zlib/include \
+-Dzlib.library=/opt/homebrew/opt/zlib/lib \
+-DCMAKE_OSX_ARCHITECTURES=arm64
+```
+
+### 3.6 编译hadoop-mapreduce-client-nativetask 时显示"PRIu64" d
+
+这个模块不能跳过了，只能老老实实解决问题。
+
+```verilog
+[WARNING] /opt/software/hadoop-3.3.6-src/hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-nativetask/src/main/native/src/lib/MapOutputCollector.cc:305:41: error: invalid suffix on literal; C++11 requires a space between literal and identifier [-Wreserved-user-defined-literal]
+[WARNING]   305 |     LOG("%s-spill: { id: %d, collect: %"PRIu64" ms, "
+[WARNING]       |                                         ^
+[WARNING]       |
+[WARNING] /opt/software/hadoop-3.3.6-src/hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-nativetask/src/main/native/src/lib/MapOutputCollector.cc:306:28: error: invalid suffix on literal; C++11 requires a space between literal and identifier [-Wreserved-user-defined-literal]
+[WARNING]   306 |         "in-memory sort: %"PRIu64" ms, in-memory records: %"PRIu64", "
+[WARNING]       |                            ^
+[WARNING]       |
+[WARNING] /opt/software/hadoop-3.3.6-src/hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-nativetask/src/main/native/src/lib/MapOutputCollector.cc:306:61: error: invalid suffix on literal; C++11 requires a space between literal and identifier [-Wreserved-user-defined-literal]
+[WARNING]   306 |         "in-memory sort: %"PRIu64" ms, in-memory records: %"PRIu64", "
+[WARNING]       |                                                             ^
+[WARNING]       |
+[WARNING] /opt/software/hadoop-3.3.6-src/hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-nativetask/src/main/native/src/lib/MapOutputCollector.cc:307:25: error: invalid suffix on literal; C++11 requires a space between literal and identifier [-Wreserved-user-defined-literal]
+[WARNING]   307 |         "merge&spill: %"PRIu64" ms, uncompressed size: %"PRIu64", "
+[WARNING]       |                         ^
+[WARNING]       |
+[WARNING] /opt/software/hadoop-3.3.6-src/hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-nativetask/src/main/native/src/lib/MapOutputCollector.cc:307:58: error: invalid suffix on literal; C++11 requires a space between literal and identifier [-Wreserved-user-defined-literal]
+[WARNING]   307 |         "merge&spill: %"PRIu64" ms, uncompressed size: %"PRIu64", "
+[WARNING]       |                                                          ^
+[WARNING]       |
+[WARNING] /opt/software/hadoop-3.3.6-src/hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-nativetask/src/main/native/src/lib/MapOutputCollector.cc:308:23: error: invalid suffix on literal; C++11 requires a space between literal and identifier [-Wreserved-user-defined-literal]
+[WARNING]   308 |         "real size: %"PRIu64" path: %s }",
+[WARNING]       |                       ^
+[WARNING]       |
+[WARNING] /opt/software/hadoop-3.3.6-src/hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-nativetask/src/main/native/src/lib/MapOutputCollector.cc:373:55: error: invalid suffix on literal; C++11 requires a space between literal and identifier [-Wreserved-user-defined-literal]
+[WARNING]   373 |   LOG("Final-merge-spill: { id: %d, in-memory sort: %"PRIu64" ms, "
+[WARNING]       |                                                       ^
+[WARNING]       |
+[WARNING] /opt/software/hadoop-3.3.6-src/hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-nativetask/src/main/native/src/lib/MapOutputCollector.cc:374:29: error: invalid suffix on literal; C++11 requires a space between literal and identifier [-Wreserved-user-defined-literal]
+[WARNING]   374 |       "in-memory records: %"PRIu64", merge&spill: %"PRIu64" ms, "
+[WARNING]       |                             ^
+[WARNING]       |
+[WARNING] /opt/software/hadoop-3.3.6-src/hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-nativetask/src/main/native/src/lib/MapOutputCollector.cc:374:53: error: invalid suffix on literal; C++11 requires a space between literal and identifier [-Wreserved-user-defined-literal]
+[WARNING]   374 |       "in-memory records: %"PRIu64", merge&spill: %"PRIu64" ms, "
+[WARNING]       |                                                     ^
+[WARNING]       |
+[WARNING] /opt/software/hadoop-3.3.6-src/hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-nativetask/src/main/native/src/lib/MapOutputCollector.cc:375:19: error: invalid suffix on literal; C++11 requires a space between literal and identifier [-Wreserved-user-defined-literal]
+[WARNING]   375 |       "records: %"PRIu64", uncompressed size: %"PRIu64", "
+[WARNING]       |                   ^
+[WARNING]       |
+[WARNING] /opt/software/hadoop-3.3.6-src/hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-nativetask/src/main/native/src/lib/MapOutputCollector.cc:375:49: error: invalid suffix on literal; C++11 requires a space between literal and identifier [-Wreserved-user-defined-literal]
+[WARNING]   375 |       "records: %"PRIu64", uncompressed size: %"PRIu64", "
+[WARNING]       |                                                 ^
+[WARNING]       |
+[WARNING] /opt/software/hadoop-3.3.6-src/hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-nativetask/src/main/native/src/lib/MapOutputCollector.cc:376:21: error: invalid suffix on literal; C++11 requires a space between literal and identifier [-Wreserved-user-defined-literal]
+[WARNING]   376 |       "real size: %"PRIu64" path: %s }",
+[WARNING]       |                     ^
+[WARNING]       |
+[WARNING] /opt/software/hadoop-3.3.6-src/hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-nativetask/src/main/native/src/lib/MapOutputCollector.cc:305:41: error: invalid suffix on literal; C++11 requires a space between literal and identifier [-Wreserved-user-defined-literal]
+[WARNING]   305 |     LOG("%s-spill: { id: %d, collect: %"PRIu64" ms, "
+[WARNING]       |                                         ^
+[WARNING]       |
+[WARNING] /opt/software/hadoop-3.3.6-src/hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-nativetask/src/main/native/src/lib/MapOutputCollector.cc:306:28: error: invalid suffix on literal; C++11 requires a space between literal and identifier [-Wreserved-user-defined-literal]
+[WARNING]   306 |         "in-memory sort: %"PRIu64" ms, in-memory records: %"PRIu64", "
+[WARNING]       |                            ^
+[WARNING]       |
+[WARNING] /opt/software/hadoop-3.3.6-src/hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-nativetask/src/main/native/src/lib/MapOutputCollector.cc:306:61: error: invalid suffix on literal; C++11 requires a space between literal and identifier [-Wreserved-user-defined-literal]
+[WARNING]   306 |         "in-memory sort: %"PRIu64" ms, in-memory records: %"PRIu64", "
+[WARNING]       |                                                             ^
+[WARNING]       |
+[WARNING] /opt/software/hadoop-3.3.6-src/hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-nativetask/src/main/native/src/lib/MapOutputCollector.cc:307:25: error: invalid suffix on literal; C++11 requires a space between literal and identifier [-Wreserved-user-defined-literal]
+[WARNING]   307 |         "merge&spill: %"PRIu64" ms, uncompressed size: %"PRIu64", "
+[WARNING]       |                         ^
+[WARNING]       |
+[WARNING] /opt/software/hadoop-3.3.6-src/hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-nativetask/src/main/native/src/lib/MapOutputCollector.cc:307:58: error: invalid suffix on literal; C++11 requires a space between literal and identifier [-Wreserved-user-defined-literal]
+[WARNING]   307 |         "merge&spill: %"PRIu64" ms, uncompressed size: %"PRIu64", "
+[WARNING]       |                                                          ^
+[WARNING]       |
+[WARNING] /opt/software/hadoop-3.3.6-src/hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-nativetask/src/main/native/src/lib/MapOutputCollector.cc:308:23: error: invalid suffix on literal; C++11 requires a space between literal and identifier [-Wreserved-user-defined-literal]
+[WARNING]   308 |         "real size: %"PRIu64" path: %s }",
+[WARNING]       |                       ^
+[WARNING]       |
+[WARNING] 12 errors generated.
+[WARNING] /opt/software/hadoop-3.3.6-src/hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-nativetask/src/main/native/src/lib/MapOutputCollector.cc:373:55: error: invalid suffix on literal; C++11 requires a space between literal and identifier [-Wreserved-user-defined-literal]
+[WARNING]   373 |   LOG("Final-merge-spill: { id: %d, in-memory sort: %"PRIu64" ms, "
+[WARNING]       |                                                       ^
+[WARNING]       |
+[WARNING] /opt/software/hadoop-3.3.6-src/hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-nativetask/src/main/native/src/lib/MapOutputCollector.cc:374:29: error: invalid suffix on literal; C++11 requires a space between literal and identifier [-Wreserved-user-defined-literal]
+[WARNING]   374 |       "in-memory records: %"PRIu64", merge&spill: %"PRIu64" ms, "
+[WARNING]       |                             ^
+[WARNING]       |
+[WARNING] /opt/software/hadoop-3.3.6-src/hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-nativetask/src/main/native/src/lib/MapOutputCollector.cc:374:53: error: invalid suffix on literal; C++11 requires a space between literal and identifier [-Wreserved-user-defined-literal]
+[WARNING]   374 |       "in-memory records: %"PRIu64", merge&spill: %"PRIu64" ms, "
+[WARNING]       |                                                     ^
+[WARNING]       |
+[WARNING] /opt/software/hadoop-3.3.6-src/hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-nativetask/src/main/native/src/lib/MapOutputCollector.cc:375:19: error: invalid suffix on literal; C++11 requires a space between literal and identifier [-Wreserved-user-defined-literal]
+[WARNING]   375 |       "records: %"PRIu64", uncompressed size: %"PRIu64", "
+[WARNING]       |                   ^
+[WARNING]       |
+[WARNING] /opt/software/hadoop-3.3.6-src/hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-nativetask/src/main/native/src/lib/MapOutputCollector.cc:375:49: error: invalid suffix on literal; C++11 requires a space between literal and identifier [-Wreserved-user-defined-literal]
+[WARNING]   375 |       "records: %"PRIu64", uncompressed size: %"PRIu64", "
+[WARNING]       |                                                 ^
+[WARNING]       |
+[WARNING] /opt/software/hadoop-3.3.6-src/hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-nativetask/src/main/native/src/lib/MapOutputCollector.cc:376:21: error: invalid suffix on literal; C++11 requires a space between literal and identifier [-Wreserved-user-defined-literal]
+[WARNING]   376 |       "real size: %"PRIu64" path: %s }",
+[WARNING]       |                     ^
+[WARNING]       |
+[WARNING] make[2]: *** [CMakeFiles/nativetask_static.dir/main/native/src/lib/MapOutputCollector.cc.o] Error 1
+[WARNING] make[2]: *** Waiting for unfinished jobs....
+[WARNING] 12 errors generated.
+[WARNING] make[2]: *** [CMakeFiles/nativetask.dir/main/native/src/lib/MapOutputCollector.cc.o] Error 1
+[WARNING] make[2]: *** Waiting for unfinished jobs....
+[WARNING] make[1]: *** [CMakeFiles/nativetask_static.dir/all] Error 2
+[WARNING] make[1]: *** Waiting for unfinished jobs....
+[WARNING] /opt/software/hadoop-3.3.6-src/hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-nativetask/src/main/native/src/lib/Merge.cc:133:12: warning: variable 'total_record' set but not used [-Wunused-but-set-variable]
+[WARNING]   133 |   uint64_t total_record = 0;
+[WARNING]       |            ^
+[WARNING] In file included from /opt/software/hadoop-3.3.6-src/hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-nativetask/src/main/native/src/lib/Merge.cc:22:
+[WARNING] /opt/software/hadoop-3.3.6-src/hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-nativetask/src/main/native/src/lib/Merge.h:229:12: warning: private field '_config' is not used [-Wunused-private-field]
+[WARNING]   229 |   Config * _config;
+[WARNING]       |            ^
+[WARNING] 2 warnings generated.
+[WARNING] make[1]: *** [CMakeFiles/nativetask.dir/all] Error 2
+[WARNING] make: *** [all] Error 2
+```
+
+编译器提示在使用 `PRIu64` 宏时需要在格式字符串中的 `%` 和宏之间加一个空格。这是由于 C++11 标准要求在字面量和标识符之间要有空格，以避免歧义.
